@@ -1,0 +1,239 @@
+<!doctype html>
+<!--
+VERDO: один файл. Как запустить для всех:
+1) Supabase: создайте проект, в SQL Editor выполните SQL ниже, в Authentication > Email выключите Confirm email.
+2) Впишите Project URL и anon key в начале скрипта (SUPABASE_URL, SUPABASE_ANON_KEY).
+3) Загрузите этот файл как index.html в репозиторий GitHub, включите Settings > Pages (ветка main, папка root).
+
+-- Supabase → SQL Editor → Run
+create table folders(id uuid primary key default gen_random_uuid(), user_id uuid not null default auth.uid() references auth.users on delete cascade, name text not null, created_at timestamptz default now());
+create table notes(id uuid primary key default gen_random_uuid(), user_id uuid not null default auth.uid() references auth.users on delete cascade, title text not null default '', body text default '', folder_id uuid references folders on delete set null, fav boolean default false, deleted_at timestamptz, created_at timestamptz default now());
+create table tasks(id uuid primary key default gen_random_uuid(), user_id uuid not null default auth.uid() references auth.users on delete cascade, title text not null, due date, due_time text, done boolean default false, fav boolean default false, deleted_at timestamptz, created_at timestamptz default now());
+create table events(id uuid primary key default gen_random_uuid(), user_id uuid not null default auth.uid() references auth.users on delete cascade, title text not null, day date not null, start_t text, end_t text, created_at timestamptz default now());
+do $$ declare t text; begin foreach t in array array['folders','notes','tasks','events'] loop
+  execute format('alter table %I enable row level security', t);
+  execute format('create policy "own rows" on %I for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid())', t);
+end loop; end $$;
+
+-->
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050a07"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Verdo"><title>Verdo</title>
+<style>:root{--bg:#050a07;--g:#3ddc84;--gd:#0f2a1a;--line:rgba(120,255,170,.14);--glass:rgba(255,255,255,.04);--t:#eaf5ee;--m:#8aa396;--r:18px;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--t);min-height:100dvh;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;z-index:-1;background:radial-gradient(900px 600px at 100% -10%,rgba(61,220,132,.28),transparent 60%),radial-gradient(700px 500px at 0 110%,rgba(61,220,132,.2),transparent 60%)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0}
+:focus-visible{outline:2px solid var(--g);outline-offset:2px}
+input,select,textarea{width:100%;background:var(--glass);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:10px}
+textarea{min-height:180px;resize:vertical}
+.auth{min-height:100dvh;display:grid;place-content:center;padding:24px;width:min(420px,100%);margin:auto;text-align:center}
+.logo{font:italic 700 64px/1 "Snell Roundhand","Segoe Script","Brush Script MT",cursive;background:linear-gradient(#fff,#8d9892);-webkit-background-clip:text;color:transparent;margin-bottom:10px}
+.auth p{color:var(--m);margin-bottom:28px}
+.btn{position:relative;overflow:hidden;display:block;width:min(100%,200px);margin-left:auto;margin-right:auto;padding:10px 20px;font-size:15px;border-radius:12px;border:1px solid var(--line);background:rgba(0,0,0,.35);margin-bottom:10px}
+.btn.primary{background:var(--gd);border-color:var(--g)}
+.err{color:#ff8a8a;min-height:22px;font-size:14px;margin-bottom:8px}
+.shell{display:grid;grid-template-columns:280px 1fr;min-height:100dvh}
+.side{padding:28px 18px;border-right:1px solid var(--line);background:rgba(0,0,0,.35);backdrop-filter:blur(20px);display:flex;flex-direction:column;gap:8px}
+.side h1{font-weight:800;letter-spacing:.5px;font-size:20px;margin:0 8px 18px}
+.nav{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px;border-radius:16px;border:1px solid transparent;transition:.25s}
+.nav b{margin-left:auto;font-weight:500;color:var(--m)}
+.nav.on{background:var(--gd);border-color:var(--g);box-shadow:0 0 24px rgba(61,220,132,.18)}
+.wave{position:absolute;left:50%;top:50%;width:10px;height:10px;border-radius:50%;pointer-events:none;transform:translate(-50%,-50%) scale(0);background:radial-gradient(circle,rgba(61,220,132,.5),rgba(61,220,132,.18) 45%,transparent 70%);animation:wave 1.1s cubic-bezier(.2,.6,.3,1) forwards}
+@keyframes wave{to{transform:translate(-50%,-50%) scale(36);opacity:0}}
+.main{padding:40px min(5vw,56px) 120px;max-width:900px;width:100%}
+h2{font-size:38px;font-weight:800}
+.sub{color:var(--m);margin:4px 0 24px}
+h3{margin:28px 0 12px;font-size:20px}
+.row{display:flex;align-items:center;gap:14px;padding:14px 16px;margin-bottom:10px;border:1px solid var(--line);border-radius:var(--r);background:var(--glass);backdrop-filter:blur(10px)}
+.row.ev{border-left:4px solid var(--g)}
+.row .grow{flex:1;min-width:0;cursor:pointer}
+.row small{color:var(--m);display:block}
+.row.done .grow{text-decoration:line-through;color:var(--m)}
+.chk{width:22px;height:22px;border-radius:50%;border:2px solid var(--m);flex:none}
+.done .chk{background:var(--g);border-color:var(--g)}
+.ic{color:var(--m);padding:4px 8px;font-size:18px}.ic.on{color:var(--g)}
+.stats{display:flex;gap:18px;align-items:center;margin-bottom:8px}
+.stats ul{list-style:none;padding:14px 18px;border:1px solid var(--line);border-radius:var(--r);background:var(--glass);flex:1;line-height:1.9}
+.ring{width:130px;height:130px;position:relative;flex:none}.ring span{position:absolute;inset:0;display:grid;place-content:center;font-size:26px;font-weight:700}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:var(--m)}.dot.od{background:#ff7a59}
+.empty{color:var(--m);text-align:center;padding:36px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.card{padding:16px;border:1px solid var(--line);border-radius:var(--r);background:var(--glass);cursor:pointer;min-height:110px}
+.card p{color:var(--m);font-size:14px;margin-top:6px;max-height:3.6em;overflow:hidden}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center}
+.cal button{aspect-ratio:1;border-radius:50%;position:relative}.cal .h{color:var(--m);font-size:13px;aspect-ratio:auto}
+.cal .sel{background:var(--g);color:#04110a;font-weight:700}.cal .has:after{content:"";position:absolute;bottom:6px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--g)}
+.top{display:flex;justify-content:space-between;align-items:center}
+.pills{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}.pills button{padding:8px 16px;border:1px solid var(--line);border-radius:99px}.pills .on{background:var(--g);color:#04110a}
+.fab{display:none}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(6px);display:grid;place-items:center;padding:16px;z-index:9}
+.sheet{width:min(520px,100%);max-height:92dvh;overflow:auto;padding:24px;border-radius:24px;border:1px solid var(--line);background:#0a1510}
+.menu{display:none}
+@media(max-width:800px){
+.shell{display:block}.side{position:fixed;inset:0 25% 0 0;z-index:8;transform:translateX(-100%);transition:.3s;background:#07110b}
+.side.open{transform:none}.menu{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:7;justify-content:space-around;align-items:center;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:rgba(5,10,7,.85);backdrop-filter:blur(20px);border-top:1px solid var(--line)}
+.menu button{position:relative;overflow:hidden;padding:10px 14px;border-radius:14px}.menu .plus{background:var(--gd);border:1px solid var(--g);font-size:22px;padding:6px 18px}
+.main{padding-top:max(28px,env(safe-area-inset-top))}h2{font-size:30px}.stats{flex-direction:column;align-items:stretch}.ring{margin:auto}}
+@media(prefers-reduced-motion:reduce){.wave{animation-duration:.01s}}
+
+.demo{position:fixed;top:6px;right:12px;font-size:11px;color:var(--m);z-index:20;pointer-events:none}</style></head>
+<body><div class="demo" id="demo"></div><div id="app"></div>
+<script type="module">
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';   // <- вставьте Project URL из Supabase
+const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';                 // <- вставьте ключ anon public
+const DEMO = SUPABASE_URL.includes('YOUR-PROJECT');         // пока ключи не вписаны, работает демо-режим (данные только в этом браузере)
+const U = SUPABASE_URL, K = SUPABASE_ANON_KEY;
+const createClient = DEMO ? null : (await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm')).createClient;
+const LS=(()=>{try{localStorage.setItem('_t','1');return localStorage}catch{return null}})(),mem={};
+const rd=k=>{try{return JSON.parse((LS?LS.getItem(k):mem[k])||'null')}catch{return null}},wr=(k,v)=>{const s=JSON.stringify(v);try{LS?LS.setItem(k,s):mem[k]=s}catch{mem[k]=s}};
+let cb=()=>{};
+function mockClient(){
+ const auth={
+  async signInWithPassword({email,password}){const u=(rd('v_users')||[]).find(x=>x.email===email&&x.password===password);if(!u)return{data:{},error:{message:'Неверная почта или пароль'}};wr('v_session',{id:u.id,email});const s={user:{id:u.id,email}};setTimeout(()=>cb('SIGNED_IN',s));return{data:{session:s},error:null}},
+  async signUp({email,password}){const us=rd('v_users')||[];if(us.some(x=>x.email===email))return{data:{},error:{message:'Эта почта уже зарегистрирована'}};const u={id:crypto.randomUUID(),email,password};wr('v_users',[...us,u]);return auth.signInWithPassword({email,password})},
+  async signOut(){wr('v_session',null);cb('SIGNED_OUT',null)},
+  onAuthStateChange(f){cb=f;setTimeout(()=>{const s=rd('v_session');f('INITIAL_SESSION',s?{user:s}:null)});return{data:{subscription:{}}}}};
+ const from=t=>{const key=()=>'v_'+t+'_'+rd('v_session').id,all=()=>rd(key())||[];
+  const mk=fn=>{const q={f:[]};q.eq=(c,v)=>{q.f.push([c,v]);return q};q.order=()=>q;q.then=(a,b)=>Promise.resolve(fn(q.f)).then(a,b);return q};
+  const m=(f,r)=>f.every(([c,v])=>r[c]===v);
+  return{select:()=>mk(()=>({data:all().sort((a,b)=>b.created_at.localeCompare(a.created_at))})),
+   insert:o=>mk(()=>{wr(key(),[...all(),{id:crypto.randomUUID(),created_at:new Date().toISOString(),...o}]);return{}}),
+   update:o=>mk(f=>{wr(key(),all().map(r=>m(f,r)?{...r,...o}:r));return{}}),
+   delete:()=>mk(f=>{wr(key(),all().filter(r=>!m(f,r)));return{}})}};
+ return{auth,from}}
+
+if (DEMO) document.getElementById('demo').textContent = 'Демо: данные хранятся только в этом браузере';
+const db = (DEMO ? mockClient : createClient)(U, K), $ = s => document.querySelector(s), app = $('#app');
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const iso = d => d.toLocaleDateString('sv'), today = () => iso(new Date());
+const S = {view:'day', tasks:[], notes:[], events:[], folders:[], cal:new Date(), day:today(), folder:null, filter:'all', user:null};
+const NAV = [['day','☀','Мой день'],['tasks','✓','Задачи'],['notes','▤','Заметки'],['calendar','▦','Календарь'],['folders','🗀','Папки'],['favs','★','Избранное'],['settings','⚙','Настройки'],['trash','🗑','Недавно удалённые']];
+const MON = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+function wave(el){ const w = document.createElement('span'); w.className = 'wave'; el.append(w); setTimeout(() => w.remove(), 1200); }
+const live = t => t.filter(x => !x.deleted_at);
+
+async function load(){
+  const r = await Promise.all(['tasks','notes','events','folders'].map(t => db.from(t).select('*').order('created_at',{ascending:false})));
+  ['tasks','notes','events','folders'].forEach((t,i) => S[t] = r[i].data || []);
+  render();
+}
+function authView(msg=''){
+  app.innerHTML = `<div class="auth"><div class="logo">verdo</div><p>Всё важное — в одном месте</p>
+  <input id="em" type="email" placeholder="Почта" autocomplete="email"><input id="pw" type="password" placeholder="Пароль (от 6 символов)" autocomplete="current-password">
+  <div class="err" id="err">${esc(msg)}</div><button class="btn primary" id="in">Войти</button><button class="btn" id="up">Создать аккаунт</button></div>`;
+  const run = async mode => {
+    const email = $('#em').value.trim(), password = $('#pw').value;
+    if (password.length < 6) return $('#err').textContent = 'Пароль должен быть не короче 6 символов';
+    const {data, error} = mode === 'in' ? await db.auth.signInWithPassword({email, password}) : await db.auth.signUp({email, password});
+    if (error) return $('#err').textContent = error.message;
+    if (!data.session) $('#err').textContent = 'Мы отправили письмо. Подтвердите почту и войдите.';
+  };
+  $('#in').onclick = e => { wave(e.currentTarget); run('in'); }; $('#up').onclick = e => { wave(e.currentTarget); run('up'); };
+}
+function render(){
+  if (!S.user) return;
+  const nav = NAV.map(([k,i,n]) => `<button class="nav ${S.view===k?'on':''}" data-nav="${k}"><span>${i}</span>${n}${count(k)}</button>`).join('');
+  app.innerHTML = `<div class="shell"><aside class="side" id="side"><h1>VERDO</h1>${nav}<button class="btn primary" data-add="task" style="margin-top:14px">+ Добавить</button></aside>
+  <main class="main">${views[S.view]()}</main></div>
+  <nav class="menu"><button data-nav="day">☀</button><button data-nav="calendar">▦</button><button class="plus" data-add="task">+</button><button data-nav="notes">▤</button><button id="burger">☰</button></nav>`;
+}
+const count = k => k==='tasks' ? `<b>${live(S.tasks).filter(t=>!t.done).length}</b>` : k==='notes' ? `<b>${live(S.notes).length}</b>` : k==='day' ? `<b>${live(S.tasks).filter(t=>t.due===today()&&!t.done).length}</b>` : '';
+const taskRow = t => `<div class="row ${t.done?'done':''}"><button class="chk" data-act="done" data-id="${t.id}" aria-label="Выполнено"></button><div class="grow" data-act="edit-task" data-id="${t.id}">${esc(t.title)}<small>${t.due?esc(t.due):''} ${esc(t.due_time||'')}</small></div><button class="ic ${t.fav?'on':''}" data-act="fav-task" data-id="${t.id}">★</button><button class="ic" data-act="del-task" data-id="${t.id}">✕</button></div>`;
+const noteCard = n => `<div class="card" data-act="edit-note" data-id="${n.id}"><b>${n.fav?'★ ':''}${esc(n.title||'Без названия')}</b><p>${esc(n.body)}</p></div>`;
+const evRow = e => `<div class="row ev"><div class="grow"><b>${esc(e.title)}</b><small>${esc(e.start_t||'')}${e.end_t?' – '+esc(e.end_t):''}</small></div><button class="ic" data-act="del-ev" data-id="${e.id}">✕</button></div>`;
+const head = (t,s='') => `<div class="top"><div><h2>${t}</h2><div class="sub">${s}</div></div><button class="ic on" data-add="${S.view==='notes'?'note':S.view==='folders'?'folder':S.view==='calendar'?'event':'task'}" style="font-size:28px">+</button></div>`;
+
+const views = {
+ day(){
+  const t = live(S.tasks), td = today(), now = t.filter(x => x.due === td), done = now.filter(x => x.done).length, od = t.filter(x => x.due && x.due < td && !x.done).length;
+  const p = now.length ? done / now.length : 0, C = 2 * Math.PI * 52, ev = S.events.filter(e => e.day === td);
+  const date = new Date().toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'});
+  return head('Мой день', date) + `<div class="stats"><div class="ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="rgba(61,220,132,.12)" stroke-width="10"/><circle cx="60" cy="60" r="52" fill="none" stroke="#3ddc84" stroke-width="10" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-p)}" transform="rotate(-90 60 60)" style="transition:.6s"/></svg><span>${done}/${now.length}</span></div>
+  <ul><li><i class="dot" style="background:var(--g)"></i>${done} выполнено</li><li><i class="dot"></i>${now.length-done} осталось</li><li><i class="dot od"></i>${od} просрочено</li></ul></div>
+  <h3>Сегодня</h3>${now.map(taskRow).join('') || '<div class="empty">На сегодня задач нет</div>'}<h3>События</h3>${ev.map(evRow).join('') || '<div class="empty">Событий нет</div>'}`;
+ },
+ tasks(){
+  const td = today(), w = iso(new Date(Date.now()+7*864e5));
+  let t = live(S.tasks); if (S.filter==='today') t = t.filter(x=>x.due===td); if (S.filter==='week') t = t.filter(x=>x.due&&x.due>=td&&x.due<=w);
+  return head('Задачи') + `<div class="pills">${[['all','Все'],['today','Сегодня'],['week','Неделя']].map(([k,n])=>`<button class="${S.filter===k?'on':''}" data-filter="${k}">${n}</button>`).join('')}</div>` + (t.map(taskRow).join('') || '<div class="empty">Задач нет. Нажмите +, чтобы добавить.</div>');
+ },
+ notes(){ const n = live(S.notes); return head('Заметки') + `<input id="q" placeholder="Поиск заметок"><div class="grid">${n.map(noteCard).join('') || '<div class="empty">Заметок пока нет</div>'}</div>`; },
+ calendar(){
+  const y = S.cal.getFullYear(), m = S.cal.getMonth(), first = (new Date(y,m,1).getDay()+6)%7, days = new Date(y,m+1,0).getDate();
+  let cells = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=>`<div class="h">${d}</div>`).join('') + '<span></span>'.repeat(first);
+  for (let d=1; d<=days; d++){ const k = iso(new Date(y,m,d)); cells += `<button class="${k===S.day?'sel':''} ${S.events.some(e=>e.day===k)?'has':''}" data-day="${k}">${d}</button>`; }
+  return head('Календарь') + `<div class="top"><button class="ic" data-m="-1">‹</button><b>${MON[m]} ${y}</b><button class="ic" data-m="1">›</button></div><div class="cal">${cells}</div><h3>${S.day}</h3>${S.events.filter(e=>e.day===S.day).map(evRow).join('') || '<div class="empty">Событий нет</div>'}`;
+ },
+ folders(){
+  if (S.folder){ const f = S.folders.find(x=>x.id===S.folder); return `<button class="ic on" data-folder="">‹ Папки</button><h2>${esc(f?.name)}</h2><div class="sub"></div><div class="grid">${live(S.notes).filter(n=>n.folder_id===S.folder).map(noteCard).join('') || '<div class="empty">В папке пусто</div>'}</div>`; }
+  return head('Папки') + (S.folders.map(f=>`<div class="row"><div class="grow" data-folder="${f.id}">🗀 ${esc(f.name)}<small>${live(S.notes).filter(n=>n.folder_id===f.id).length} заметок</small></div><button class="ic" data-act="del-folder" data-id="${f.id}">✕</button></div>`).join('') || '<div class="empty">Папок нет</div>');
+ },
+ favs(){ const t = live(S.tasks).filter(x=>x.fav), n = live(S.notes).filter(x=>x.fav); return head('Избранное') + (t.map(taskRow).join('') + `<div class="grid">${n.map(noteCard).join('')}</div>` || '') + (t.length+n.length ? '' : '<div class="empty">Отметьте важное звёздочкой</div>'); },
+ settings(){ return head('Настройки') + `<div class="row"><div class="grow">Мой аккаунт<small>${esc(S.user.email)}</small></div></div><button class="btn" id="out">Выйти</button>`; },
+ trash(){ const r = [...S.tasks.filter(x=>x.deleted_at).map(x=>['tasks',x]), ...S.notes.filter(x=>x.deleted_at).map(x=>['notes',x])];
+  return head('Недавно удалённые') + (r.map(([t,x])=>`<div class="row"><div class="grow">${esc(x.title||'Без названия')}</div><button class="ic on" data-act="restore" data-t="${t}" data-id="${x.id}">Вернуть</button></div>`).join('') || '<div class="empty">Корзина пуста</div>'); }
+};
+
+function modal(html, onSave, onDel){
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="sheet">${html}<button class="btn primary" id="ok">Сохранить</button>${onDel?'<button class="btn" id="rm">Удалить</button>':''}<button class="btn" id="no">Отмена</button></div>`;
+  document.body.append(m); m.querySelector('input,textarea')?.focus();
+  m.onclick = e => { if (e.target === m || e.target.id === 'no') m.remove(); };
+  m.querySelector('#ok').onclick = async () => { await onSave(m); m.remove(); load(); };
+  if (onDel) m.querySelector('#rm').onclick = async () => { await onDel(); m.remove(); load(); };
+}
+const v = (m,id) => m.querySelector('#'+id).value;
+function addDialog(type){
+  const tabs = `<div class="pills">${[['task','Задача'],['note','Заметка'],['event','Событие'],['folder','Папка']].map(([k,n])=>`<button data-t="${k}" class="${k===type?'on':''}">${n}</button>`).join('')}</div>`;
+  const forms = {
+   task:`<input id="a" placeholder="Что нужно сделать?"><input id="b" type="date" value="${today()}"><input id="c" type="time">`,
+   note:`<input id="a" placeholder="Название"><textarea id="b" placeholder="Текст"></textarea><select id="c"><option value="">Без папки</option>${S.folders.map(f=>`<option value="${f.id}">${esc(f.name)}</option>`).join('')}</select>`,
+   event:`<input id="a" placeholder="Название"><input id="b" type="date" value="${S.day}"><input id="c" type="time"><input id="d" type="time">`,
+   folder:`<input id="a" placeholder="Название папки">`};
+  const save = async (m, t) => { const a = v(m,'a').trim(); if (!a) return;
+   if (t==='task') await db.from('tasks').insert({title:a, due:v(m,'b')||null, due_time:v(m,'c')||null});
+   if (t==='note') await db.from('notes').insert({title:a, body:v(m,'b'), folder_id:v(m,'c')||null});
+   if (t==='event') await db.from('events').insert({title:a, day:v(m,'b'), start_t:v(m,'c')||null, end_t:v(m,'d')||null});
+   if (t==='folder') await db.from('folders').insert({name:a}); };
+  let cur = type; modal(tabs + `<div id="f">${forms[type]}</div>`, m => save(m, cur));
+  const m = document.querySelector('.modal'); m.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { cur = b.dataset.t; m.querySelectorAll('[data-t]').forEach(x => x.classList.toggle('on', x===b)); m.querySelector('#f').innerHTML = forms[cur]; });
+}
+function editTask(t){ modal(`<input id="a" value="${esc(t.title)}"><input id="b" type="date" value="${t.due||''}"><input id="c" type="time" value="${t.due_time||''}">`,
+  m => db.from('tasks').update({title:v(m,'a'), due:v(m,'b')||null, due_time:v(m,'c')||null}).eq('id',t.id)); }
+function editNote(n){ modal(`<input id="a" value="${esc(n.title)}" placeholder="Название"><textarea id="b">${esc(n.body)}</textarea><select id="c"><option value="">Без папки</option>${S.folders.map(f=>`<option value="${f.id}" ${f.id===n.folder_id?'selected':''}>${esc(f.name)}</option>`).join('')}</select>
+  <button class="btn" id="star">${n.fav?'★ В избранном':'☆ В избранное'}</button>`, m => db.from('notes').update({title:v(m,'a'), body:v(m,'b'), folder_id:v(m,'c')||null}).eq('id',n.id),
+  () => db.from('notes').update({deleted_at:new Date().toISOString()}).eq('id',n.id));
+  document.querySelector('#star').onclick = async e => { await db.from('notes').update({fav:!n.fav}).eq('id',n.id); e.target.closest('.modal').remove(); load(); }; }
+
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-nav],[data-add],[data-act],[data-filter],[data-day],[data-m],[data-folder],#burger,#out'); if (!el) return;
+  const D = el.dataset, id = D.id, tk = S.tasks.find(x=>x.id===id), nt = S.notes.find(x=>x.id===id), stamp = {deleted_at:new Date().toISOString()};
+  if (D.nav){ wave(el); S.view = D.nav; S.folder = null; setTimeout(render, 220); return; }
+  if (el.id === 'burger') return $('#side').classList.toggle('open');
+  if (el.id === 'out') return db.auth.signOut();
+  if (D.add !== undefined) return addDialog(D.add);
+  if (D.filter){ S.filter = D.filter; return render(); }
+  if (D.day){ S.day = D.day; return render(); }
+  if (D.m){ S.cal = new Date(S.cal.getFullYear(), S.cal.getMonth() + +D.m, 1); return render(); }
+  if (D.folder !== undefined){ S.folder = D.folder || null; return render(); }
+  const a = D.act;
+  if (a==='done') await db.from('tasks').update({done:!tk.done}).eq('id',id);
+  else if (a==='fav-task') await db.from('tasks').update({fav:!tk.fav}).eq('id',id);
+  else if (a==='del-task') await db.from('tasks').update(stamp).eq('id',id);
+  else if (a==='del-ev') await db.from('events').delete().eq('id',id);
+  else if (a==='del-folder') await db.from('folders').delete().eq('id',id);
+  else if (a==='restore') await db.from(D.t).update({deleted_at:null}).eq('id',id);
+  else if (a==='edit-task') return editTask(tk);
+  else if (a==='edit-note') return editNote(nt);
+  load();
+});
+document.addEventListener('input', e => { if (e.target.id !== 'q') return; const q = e.target.value.toLowerCase();
+  $('.grid').innerHTML = live(S.notes).filter(n => (n.title+n.body).toLowerCase().includes(q)).map(noteCard).join('') || '<div class="empty">Ничего не найдено</div>'; });
+
+db.auth.onAuthStateChange((_, s) => { S.user = s?.user || null; if (!S.user){ Object.assign(S, {tasks:[],notes:[],events:[],folders:[]}); authView(); } else load(); });
+</script></body></html>
