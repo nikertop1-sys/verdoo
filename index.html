@@ -148,7 +148,10 @@ function mockClient(){
  return{auth,from}}
 
 if (DEMO) document.getElementById('demo').textContent = 'Демо: данные хранятся только в этом браузере';
-const db = DEMO ? mockClient() : await makeFirebase(FIREBASE_CONFIG), $ = s => document.querySelector(s), app = $('#app');
+let db;
+try { db = DEMO ? mockClient() : await makeFirebase(FIREBASE_CONFIG); }
+catch (e) { document.getElementById('app').innerHTML = '<div class="auth"><div class="logo">verdo</div><p>Не удалось запустить приложение</p><div class="err">' + String(e && e.message || e).replace(/</g,'&lt;') + '</div><button class="btn primary" onclick="location.reload()">Обновить</button></div>'; throw e; }
+const $ = s => document.querySelector(s), app = $('#app');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const iso = d => d.toLocaleDateString('sv'), today = () => iso(new Date());
 const S = {view:'day', tasks:[], notes:[], events:[], folders:[], cal:new Date(), day:today(), folder:null, filter:'all', user:null};
