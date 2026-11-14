@@ -111,7 +111,7 @@ async function makeFirebase(cfg){
   const V = '10.14.1', B = 'https://www.gstatic.com/firebasejs/' + V + '/';
   const [A, Au, F] = await Promise.all(['firebase-app.js','firebase-auth.js','firebase-firestore.js'].map(f => import(B + f)));
   const fb = A.initializeApp(cfg), auth = Au.getAuth(fb), fs = F.getFirestore(fb);
-  const M = {'auth/invalid-credential':'Неверная почта или пароль','auth/wrong-password':'Неверная почта или пароль','auth/user-not-found':'Неверная почта или пароль','auth/email-already-in-use':'Эта почта уже зарегистрирована','auth/weak-password':'Пароль слишком простой (от 6 символов)','auth/invalid-email':'Неверный адрес почты','auth/too-many-requests':'Слишком много попыток, попробуйте позже','auth/network-request-failed':'Нет соединения с интернетом'};
+  const M = {'auth/invalid-credential':'Неверная почта или пароль. Если забыли пароль, нажмите «Забыли пароль?»','auth/wrong-password':'Неверная почта или пароль','auth/user-not-found':'Неверная почта или пароль','auth/email-already-in-use':'Эта почта уже зарегистрирована. Нажмите «Войти» или «Забыли пароль?»','auth/weak-password':'Пароль слишком простой (от 6 символов)','auth/invalid-email':'Неверный адрес почты','auth/too-many-requests':'Слишком много попыток, попробуйте позже','auth/network-request-failed':'Нет соединения с интернетом'};
   const sess = u => u ? {user:{id:u.uid, email:u.email}} : null;
   const go = async fn => { try { const c = await fn(); return {data:{session:sess(c.user)}, error:null}; } catch(e){ return {data:{}, error:{message:M[e.code] || e.message}}; } };
   const mk = fn => { const q = {f:[]}; q.eq = (c,v) => { q.f.push([c,v]); return q; }; q.order = () => q; q.then = (a,b) => fn(q.f).then(a,b); return q; };
@@ -122,9 +122,10 @@ async function makeFirebase(cfg){
       signInWithPassword:({email,password}) => go(() => Au.signInWithEmailAndPassword(auth,email,password)),
       signUp:({email,password}) => go(() => Au.createUserWithEmailAndPassword(auth,email,password)),
       signOut:() => Au.signOut(auth),
+      resetPassword:async email => { try { await Au.sendPasswordResetEmail(auth,email); return {error:null}; } catch(e){ return {error:{message:M[e.code] || e.message}}; } },
       onAuthStateChange:f => { Au.onAuthStateChanged(auth, u => f('CHANGE', sess(u))); return {data:{subscription:{}}}; } },
     from:t => ({
-      select:() => mk(async () => { try { const r = await F.getDocs(F.query(col(t), F.orderBy('created_at','desc'))); return {data:r.docs.map(d => ({id:d.id, ...d.data()}))}; } catch(e){ console.error(e); return {data:[], error:e}; } }),
+      select:() => mk(async () => { try { const r = await Promise.race([F.getDocs(F.query(col(t), F.orderBy('created_at','desc'))), new Promise((_,j) => setTimeout(() => j(new Error('timeout')), 10000))]); return {data:r.docs.map(d => ({id:d.id, ...d.data()}))}; } catch(e){ console.error(e); return {data:[], error:e}; } }),
       insert:o => mk(() => F.addDoc(col(t), {created_at:new Date().toISOString(), ...o}).catch(fail)),
       update:o => mk(f => F.updateDoc(F.doc(col(t), idOf(f)), o).catch(fail)),
       delete:() => mk(f => F.deleteDoc(F.doc(col(t), idOf(f))).catch(fail)) }) };
@@ -162,14 +163,16 @@ function wave(el){ const w = document.createElement('span'); w.className = 'wave
 const live = t => t.filter(x => !x.deleted_at);
 
 async function load(){
+  render();
   const r = await Promise.all(['tasks','notes','events','folders'].map(t => db.from(t).select('*').order('created_at',{ascending:false})));
   ['tasks','notes','events','folders'].forEach((t,i) => S[t] = r[i].data || []);
+  S.err = r.some(x => x.error) ? 'Не удалось загрузить данные из базы. Проверьте, что Firestore создана и правила опубликованы.' : '';
   render();
 }
 function authView(msg=''){
   app.innerHTML = `<div class="auth"><div class="logo">verdo</div><p>Всё важное — в одном месте</p>
   <input id="em" type="email" placeholder="Почта" autocomplete="email"><input id="pw" type="password" placeholder="Пароль (от 6 символов)" autocomplete="current-password">
-  <div class="err" id="err">${esc(msg)}</div><button class="btn primary" id="in">Войти</button><button class="btn" id="up">Создать аккаунт</button></div>`;
+  <div class="err" id="err">${esc(msg)}</div><button class="btn primary" id="in">Войти</button><button class="btn" id="up">Создать аккаунт</button><button class="ic" id="fp" style="font-size:14px">Забыли пароль?</button></div>`;
   const run = async mode => {
     const email = $('#em').value.trim(), password = $('#pw').value;
     if (password.length < 6) return $('#err').textContent = 'Пароль должен быть не короче 6 символов';
@@ -178,12 +181,15 @@ function authView(msg=''){
     if (!data.session) $('#err').textContent = 'Мы отправили письмо. Подтвердите почту и войдите.';
   };
   $('#in').onclick = e => { wave(e.currentTarget); run('in'); }; $('#up').onclick = e => { wave(e.currentTarget); run('up'); };
+  $('#fp').onclick = async () => { const email = $('#em').value.trim(); if (!email) return $('#err').textContent = 'Сначала введите почту';
+    const r = db.auth.resetPassword ? await db.auth.resetPassword(email) : {error:{message:'В демо-режиме сброс недоступен'}};
+    $('#err').textContent = r.error ? r.error.message : 'Если такой аккаунт есть, мы отправили письмо для сброса пароля'; };
 }
 function render(){
   if (!S.user) return;
   const nav = NAV.map(([k,i,n]) => `<button class="nav ${S.view===k?'on':''}" data-nav="${k}"><span>${i}</span>${n}${count(k)}</button>`).join('');
   app.innerHTML = `<div class="shell"><aside class="side" id="side"><h1>VERDO</h1>${nav}<button class="btn primary" data-add="task" style="margin-top:14px">+ Добавить</button></aside>
-  <main class="main">${views[S.view]()}</main></div>
+  <main class="main">${S.err ? `<div class="row" style="border-color:#ff8a8a;color:#ffb4b4">${esc(S.err)}</div>` : ''}${views[S.view]()}</main></div>
   <nav class="menu"><button data-nav="day">☀</button><button data-nav="calendar">▦</button><button class="plus" data-add="task">+</button><button data-nav="notes">▤</button><button id="burger">☰</button></nav>`;
 }
 const count = k => k==='tasks' ? `<b>${live(S.tasks).filter(t=>!t.done).length}</b>` : k==='notes' ? `<b>${live(S.notes).length}</b>` : k==='day' ? `<b>${live(S.tasks).filter(t=>t.due===today()&&!t.done).length}</b>` : '';
